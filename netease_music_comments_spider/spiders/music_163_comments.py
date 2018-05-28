@@ -33,24 +33,30 @@ class Music163CommentsSpider(scrapy.Spider):
             print("Please follow this: scrapy crawl music_163_comments -a nickname=yournickname")
 
     def parse_user(self,response):
-        users = json.loads(response.body)['result']['userprofiles']
-        if(users):
-            userId = str(users[0]['userId'])
-            # 此处只处理了前100个歌单
-            yield FormRequest(
-                url = 'http://music.163.com/api/user/playlist',
-                formdata = {'uid':userId,'offset':'0','limit':'100'},
-                callback = self.parse_playlist
-            )
-        else:
-            print("cant find the user")
+        try:
+            users = json.loads(response.body)['result']['userprofiles']
+            if(users):
+                userId = str(users[0]['userId'])
+                # 此处只处理了前100个歌单
+                yield FormRequest(
+                    url = 'http://music.163.com/api/user/playlist',
+                    formdata = {'uid':userId,'offset':'0','limit':'100'},
+                    callback = self.parse_playlist
+                )
+            else:
+                print("cant find the user")
+        except Exception as e:
+            print("parse_user exception:",e)
     
     def parse_playlist(self,response):
-        playlists = json.loads(response.body)['playlist']
-        # print("id:",playlists[0]['id'])
-        for item in playlists:
-            url = 'http://music.163.com/playlist?id=' + str(item['id'])
-            yield Request(url,callback=self.parse_song)
+        try:
+            playlists = json.loads(response.body)['playlist']
+            # print("id:",playlists[0]['id'])
+            for item in playlists:
+                url = 'http://music.163.com/playlist?id=' + str(item['id'])
+                yield Request(url,callback=self.parse_song)
+        except Exception as e:
+             print("parse_playlist exception:",e)
 
     def parse_song(self, response):
         songSelector = response.xpath('//a[re:test(@href, "/song\?id=\d+")]')
@@ -61,32 +67,35 @@ class Music163CommentsSpider(scrapy.Spider):
             yield Request(url,meta={"songId":songId,"songName":songName},callback=self.parse_comment)
 
     def parse_comment(self,response):
-        allComments = json.loads(response.body)
-        comments = allComments['comments']
-        total = allComments['total']
-        songId = response.meta['songId']
-        songName = response.meta['songName']
-        if(comments):
-            for userComment in comments:
+        try:
+            allComments = json.loads(response.body)
+            comments = allComments['comments']
+            total = allComments['total']
+            songId = response.meta['songId']
+            songName = response.meta['songName']
+            if(comments):
+                for userComment in comments:
 
-                item = CommentItem()
-                item['nickname'] = userComment['user']['nickname']
-                item['time'] = change_datetime_163music(userComment['time'])
-                repliedUser = userComment['beReplied']
-                if(repliedUser):
-                    item['beRepliedContent'] = repliedUser[0]['content']
-                else:
-                    item['beRepliedContent'] = ''
-                item['content'] = userComment['content']
-                item['songId'] = songId
-                item['songName'] = songName
-            
-                yield item
+                    item = CommentItem()
+                    item['nickname'] = userComment['user']['nickname']
+                    item['time'] = change_datetime_163music(userComment['time'])
+                    repliedUser = userComment['beReplied']
+                    if(repliedUser):
+                        item['beRepliedContent'] = repliedUser[0]['content']
+                    else:
+                        item['beRepliedContent'] = ''
+                    item['content'] = userComment['content']
+                    item['songId'] = songId
+                    item['songName'] = songName
+                
+                    yield item
 
-            paramsStr = response.url.split('?')[1]
-            params = parse.parse_qs(paramsStr)
-            offset = int(params['offset'][0]) + 100
-            url = 'http://music.163.com/api/v1/resource/comments/R_SO_4_' + songId + "?limit=100&offset=" + str(offset)
-            # 因为有的歌曲offset会不停增长，一直返回最后一页的内容
-            if offset < total:
-                yield Request(url,meta={"songId":songId,"songName":songName},callback=self.parse_comment)
+                paramsStr = response.url.split('?')[1]
+                params = parse.parse_qs(paramsStr)
+                offset = int(params['offset'][0]) + 100
+                url = 'http://music.163.com/api/v1/resource/comments/R_SO_4_' + songId + "?limit=100&offset=" + str(offset)
+                # 因为有的歌曲offset会不停增长，一直返回最后一页的内容,确保能查到最后一条记录，所以+100
+                if offset < total + 100:
+                    yield Request(url,meta={"songId":songId,"songName":songName},callback=self.parse_comment)
+        except Exception as e:
+            print("parse_comment exception:",e)
